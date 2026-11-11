@@ -1,0 +1,10 @@
+*.o
+*.ko
+*.mod
+*.mod.c
+.*.cmd
+*.order
+*.symvers
+.tmp_versions/
+tests/logic_test
+tools/sx1262-test

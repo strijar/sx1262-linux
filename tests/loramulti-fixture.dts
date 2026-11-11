@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/* Syntax test only, not a bootable board description. */
+/dts-v1/;
+#define LORA_IRQ_SPEC &gpio 7 IRQ_TYPE_LEVEL_HIGH
+/ {
+	#address-cells = <1>;
+	#size-cells = <1>;
+	gpio: gpio {
+		gpio-controller;
+		#gpio-cells = <2>;
+		interrupt-controller;
+		#interrupt-cells = <2>;
+		#address-cells = <0>;
+	};
+	lora_i2c: i2c {
+		#address-cells = <1>;
+		#size-cells = <0>;
+	};
+	lora_spi: spi {
+		#address-cells = <1>;
+		#size-cells = <0>;
+	};
+};
+#include "../examples/loramulti.dtsi"
