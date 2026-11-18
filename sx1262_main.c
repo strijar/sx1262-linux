@@ -800,7 +800,7 @@ static int sx_probe(struct spi_device *spi)
 		.silence_timeout_ms = 60000, .hard_reset_after = 2,
 	};
 
-	snprintf(s->name, sizeof(s->name), "sx1262%d", s->id);
+	snprintf(s->name, sizeof(s->name), "lora%d", s->id);
 
 	s->misc = (struct miscdevice) {
 		.minor = MISC_DYNAMIC_MINOR, .name = s->name,
