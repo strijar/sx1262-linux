@@ -81,7 +81,8 @@ static inline int sx1262_ldro(const struct sx1262_config *c)
 }
 
 /* Integer LoRa time on air, including SX126x SF5/SF6 symbol accounting. */
-static inline __u64 sx1262_airtime_quarters(const struct sx1262_config *c, unsigned int len)
+static inline __u64 sx1262_frame_quarters(const struct sx1262_config *c, unsigned int len,
+					 __u32 preamble_symbols)
 {
 	int sf = c->spreading_factor;
 	int bits = 8 * len + 16 * c->crc - 4 * sf + 20 * !c->implicit_header;
@@ -95,8 +96,19 @@ static inline __u64 sx1262_airtime_quarters(const struct sx1262_config *c, unsig
 	if (bits < 0)
 		bits = 0;
 
-	return 4ULL * (c->preamble_symbols + 12 + (sf <= 6 ? 2 : 0) +
+	return 4ULL * (preamble_symbols + 12 + (sf <= 6 ? 2 : 0) +
 		((bits + denominator - 1) / denominator) * c->coding_rate) + 1;
+}
+
+static inline __u64 sx1262_airtime_quarters(const struct sx1262_config *c, unsigned int len)
+{
+	return sx1262_frame_quarters(c, len, c->tx_preamble_symbols);
+}
+
+static inline __u32 sx1262_rx_airtime_ms(const struct sx1262_config *c, unsigned int len)
+{
+	return div_u64(sx1262_frame_quarters(c, len, c->rx_preamble_symbols) *
+		       (1U << c->spreading_factor) * sx1262_bw_div(c->bandwidth_hz) + 1999, 2000);
 }
 
 static inline __u32 sx1262_airtime_ms(const struct sx1262_config *c, unsigned int len)
@@ -108,7 +120,7 @@ static inline __u32 sx1262_airtime_ms(const struct sx1262_config *c, unsigned in
 static inline __u32 sx1262_rx_timeout_ms(const struct sx1262_config *c,
 				       enum sx_rx_stage stage)
 {
-	__u64 preamble_quarters = 4ULL * c->preamble_symbols + 17;
+	__u64 preamble_quarters = 4ULL * c->rx_preamble_symbols + 17;
 	__u64 quarters;
 	__u32 duration_ms, timeout_ms;
 
@@ -118,7 +130,8 @@ static inline __u32 sx1262_rx_timeout_ms(const struct sx1262_config *c,
 	if (stage == SX_RX_PREAMBLE && !c->implicit_header) {
 		quarters = preamble_quarters;
 	} else {
-		quarters = sx1262_airtime_quarters(c, c->implicit_header ? c->implicit_length : 255);
+		quarters = sx1262_frame_quarters(c, c->implicit_header ? c->implicit_length : 255,
+					    c->rx_preamble_symbols);
 		/* Implicit RX may never produce HEADER_VALID: allow its entire frame. */
 		if (stage == SX_RX_HEADER)
 			quarters -= preamble_quarters;
@@ -142,8 +155,10 @@ static inline int sx1262_config_valid(const struct sx1262_config *c)
 	    c->coding_rate < 5 || c->coding_rate > 8 || c->crc > 1 ||
 	    c->invert_iq > 1 || c->implicit_header > 1 || c->ldro > 2 ||
 	    (c->implicit_header && !c->implicit_length) ||
-	    c->preamble_symbols < (c->spreading_factor <= 6 ? 12U : 4U) ||
-	    c->preamble_symbols > 65535 || !c->hard_reset_after ||
+	    c->tx_preamble_symbols < (c->spreading_factor <= 6 ? 12U : 4U) ||
+	    c->tx_preamble_symbols > 65535 ||
+	    c->rx_preamble_symbols < (c->spreading_factor <= 6 ? 12U : 4U) ||
+	    c->rx_preamble_symbols > 65535 || !c->hard_reset_after ||
 	    c->hard_reset_after > 100 ||
 	    (c->silence_timeout_ms && c->silence_timeout_ms < 1000) ||
 	    c->silence_timeout_ms > 86400000)
@@ -153,6 +168,7 @@ static inline int sx1262_config_valid(const struct sx1262_config *c)
 		if (c->reserved[i])
 			return 0;
 	/* Keep hardware TX timer and software waits finite (24-bit, 64 kHz). */
-	return sx1262_airtime_ms(c, 255) <= 240000;
+	return sx1262_airtime_ms(c, 255) <= 240000 &&
+	       sx1262_rx_airtime_ms(c, 255) <= 240000;
 }
 #endif

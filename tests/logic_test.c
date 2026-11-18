@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include "../sx1262_logic.h"
 
-_Static_assert(sizeof(struct sx1262_config) == 40, "config ABI");
+_Static_assert(sizeof(struct sx1262_config) == 44, "config ABI");
 _Static_assert(sizeof(struct sx1262_frame) == 258, "frame ABI");
 _Static_assert(sizeof(struct sx1262_tx_batch) == 2080, "batch ABI");
 _Static_assert(sizeof(struct sx1262_event) == 296, "event ABI");
@@ -16,7 +16,7 @@ static void rx_timeout_test(void)
 {
 	struct sx1262_config c = {
 		.bandwidth_hz = 125000, .spreading_factor = 7, .coding_rate = 5,
-		.preamble_symbols = 25, .crc = 1,
+		.tx_preamble_symbols = 25, .rx_preamble_symbols = 25, .crc = 1,
 	};
 	const unsigned int terminal[] = {
 		SX_IRQ_RX_DONE, SX_IRQ_CRC_ERR, SX_IRQ_HEADER_ERR, SX_IRQ_TIMEOUT,
@@ -43,10 +43,10 @@ static void rx_timeout_test(void)
 		assert(sx1262_rx_next_stage(SX_RX_HEADER, terminal[i] | SX_IRQ_HEADER) == SX_RX_WAITING);
 	}
 	/* Header timeout excludes even an unusually long configured preamble. */
-	c.preamble_symbols = 1000;
+	c.rx_preamble_symbols = 1000;
 	assert(sx1262_rx_timeout_ms(&c, SX_RX_HEADER) == 607);
 	assert(sx1262_rx_timeout_ms(&c, SX_RX_PREAMBLE) > 1000);
-	c.preamble_symbols = 25;
+	c.rx_preamble_symbols = 25;
 	c.spreading_factor = 12;
 	header_ms = sx1262_rx_timeout_ms(&c, SX_RX_HEADER);
 	assert(sx1262_rx_timeout_ms(&c, SX_RX_PREAMBLE) == 1463);
@@ -65,11 +65,58 @@ static void rx_timeout_test(void)
 	assert(sx1262_rx_timeout_ms(&c, SX_RX_PREAMBLE) > 0);
 }
 
+static void separate_preambles_test(void)
+{
+	struct sx1262_config c = {
+		.version = SX1262_ABI_VERSION, .frequency_hz = 868672500,
+		.bandwidth_hz = 62500, .spreading_factor = 8, .coding_rate = 7,
+		.tx_preamble_symbols = 25, .rx_preamble_symbols = 65,
+		.crc = 1, .ldro = 1, .hard_reset_after = 2,
+	};
+	__u32 tx = sx1262_airtime_ms(&c, 255);
+	__u32 rx = sx1262_rx_airtime_ms(&c, 255);
+	__u32 guard = sx1262_rx_timeout_ms(&c, SX_RX_PREAMBLE);
+	__u32 header = sx1262_rx_timeout_ms(&c, SX_RX_HEADER);
+
+	assert(sx1262_config_valid(&c) && rx > tx);
+	c.tx_preamble_symbols = 1000;
+	assert(sx1262_airtime_ms(&c, 255) > tx);
+	assert(sx1262_rx_airtime_ms(&c, 255) == rx);
+	assert(sx1262_rx_timeout_ms(&c, SX_RX_PREAMBLE) == guard);
+	assert(sx1262_rx_timeout_ms(&c, SX_RX_HEADER) == header);
+	c.tx_preamble_symbols = 25;
+	c.rx_preamble_symbols = 1000;
+	assert(sx1262_airtime_ms(&c, 255) == tx);
+	assert(sx1262_rx_timeout_ms(&c, SX_RX_PREAMBLE) > guard);
+	assert(sx1262_rx_timeout_ms(&c, SX_RX_HEADER) == header);
+	c.implicit_header = 1;
+	c.implicit_length = 255;
+	guard = sx1262_rx_timeout_ms(&c, SX_RX_PREAMBLE);
+	c.tx_preamble_symbols = 4;
+	assert(sx1262_rx_timeout_ms(&c, SX_RX_PREAMBLE) == guard);
+	c.rx_preamble_symbols = 65;
+	assert(sx1262_rx_timeout_ms(&c, SX_RX_PREAMBLE) < guard);
+	c.rx_preamble_symbols = 3;
+	assert(!sx1262_config_valid(&c));
+	c.rx_preamble_symbols = 65536;
+	assert(!sx1262_config_valid(&c));
+	c.rx_preamble_symbols = 4;
+	assert(sx1262_config_valid(&c));
+	c.spreading_factor = 5;
+	c.tx_preamble_symbols = 12;
+	assert(!sx1262_config_valid(&c));
+	c.rx_preamble_symbols = 12;
+	assert(sx1262_config_valid(&c));
+	c.version = 1;
+	assert(!sx1262_config_valid(&c));
+}
+
 int main(void)
 {
 	struct sx1262_config c = {
-		.version = 1, .frequency_hz = 868000000, .bandwidth_hz = 125000,
-		.tx_power_dbm = 14, .preamble_symbols = 8, .silence_timeout_ms = 60000,
+		.version = SX1262_ABI_VERSION, .frequency_hz = 868000000, .bandwidth_hz = 125000,
+		.tx_power_dbm = 14, .tx_preamble_symbols = 8, .rx_preamble_symbols = 65,
+		.silence_timeout_ms = 60000,
 		.sync_word = 0x1424, .spreading_factor = 7, .coding_rate = 5,
 		.crc = 1, .hard_reset_after = 2,
 	};
@@ -85,7 +132,7 @@ int main(void)
 	assert(sx1262_ldro(&c));
 	assert(sx1262_airtime_ms(&c, 20) == 1319);
 	c.spreading_factor = 5;
-	c.preamble_symbols = 12;
+	c.tx_preamble_symbols = 12;
 	assert(sx1262_airtime_ms(&c, 20) == 19);
 	c.spreading_factor = 11;
 	c.bandwidth_hz = 125000;
@@ -97,7 +144,7 @@ int main(void)
 	c.ldro = 1;
 	assert(!sx1262_ldro(&c));
 	c.ldro = 0;
-	c.preamble_symbols = 25;
+	c.tx_preamble_symbols = 25;
 	for (sf = 5; sf <= 12; sf++) {
 		c.spreading_factor = sf;
 		for (bw = 0; bw < sizeof(bands) / sizeof(bands[0]); bw++) {
@@ -114,9 +161,9 @@ int main(void)
 		}
 	}
 	c.bandwidth_hz = 7800;
-	c.preamble_symbols = 65535;
+	c.tx_preamble_symbols = 65535;
 	assert(!sx1262_config_valid(&c)); /* Hardware timer overflow prevented. */
-	c.preamble_symbols = 25;
+	c.tx_preamble_symbols = 25;
 	c.coding_rate = 4;
 	assert(!sx1262_config_valid(&c));
 	c.coding_rate = 5;
@@ -134,6 +181,7 @@ int main(void)
 	assert(sx1262_bw_code(7812) == sx1262_bw_code(7800));
 	assert(sx1262_bw_code(12345) < 0);
 	rx_timeout_test();
+	separate_preambles_test();
 	puts("ABI, airtime, LDRO, RX stage/timeouts and configuration tests passed");
 	return 0;
 }

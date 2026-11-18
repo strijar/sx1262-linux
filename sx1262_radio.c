@@ -104,11 +104,11 @@ static void sx_antenna(struct sx1262 *s, bool rx, bool tx)
 	}
 }
 
-static int sx_packet_params(struct sx1262 *s, u8 len)
+static int sx_packet_params(struct sx1262 *s, u8 len, u32 preamble_symbols)
 {
 	const struct sx1262_config *c = &s->config;
 
-	return SX_CMD(s, 0x8c, c->preamble_symbols >> 8, c->preamble_symbols,
+	return SX_CMD(s, 0x8c, preamble_symbols >> 8, preamble_symbols,
 		      c->implicit_header, len, c->crc, c->invert_iq);
 }
 
@@ -130,7 +130,7 @@ int sx_radio_rx(struct sx1262 *s)
 		return sx_radio_idle(s);
 
 	ret = sx_packet_params(s, s->config.implicit_header ?
-			       s->config.implicit_length : 255);
+			       s->config.implicit_length : 255, s->config.rx_preamble_symbols);
 
 	if (ret)
 		return ret;
@@ -199,7 +199,8 @@ int sx_radio_properties(struct sx1262 *s)
 	s->min_hz = e22 ? 410000000 : 150000000;
 	s->max_hz = e22 ? 930000000 : 960000000;
 	s->tcxo_uv = e22 ? 1800000 : 0;
-	s->tcxo_us = 5000;
+	/* Preserve the legacy E22 startup delay: 0x0560 ticks at 64 kHz. */
+	s->tcxo_us = e22 ? 21500 : 5000;
 	s->rf_switch_us = 100;
 	ret = sx_property(dev, "semtech,frequency-min-hz", &s->min_hz);
 	ret = ret ?: sx_property(dev, "semtech,frequency-max-hz", &s->max_hz);
@@ -357,7 +358,7 @@ int sx_radio_tx(struct sx1262 *s, const struct sx1262_frame *f, u32 timeout_ms)
 
 	memcpy(buffer + 2, f->data, f->length);
 	ret = sx_command(s, buffer, f->length + 2);
-	ret = ret ?: sx_packet_params(s, f->length);
+	ret = ret ?: sx_packet_params(s, f->length, s->config.tx_preamble_symbols);
 	ret = ret ?: SX_CMD(s, 0x02, 0xff, 0xff);
 
 	if (ret)
@@ -441,6 +442,10 @@ int sx_radio_irq(struct sx1262 *s, bool from_irq)
 		} else {
 			s->stats.polled_irqs++;
 		}
+
+		if (flags & (SX_IRQ_PREAMBLE | SX_IRQ_HEADER | SX_IRQ_RX_DONE |
+			     SX_IRQ_HEADER_ERR | SX_IRQ_CRC_ERR))
+			s->rx_activity++;
 
 		next = sx1262_rx_next_stage(s->rx_stage, flags);
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include <linux/compat.h>
+#include <linux/delay.h>
 #include <linux/idr.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
@@ -7,6 +8,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/poll.h>
+#include <linux/random.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include "sx1262_internal.h"
@@ -57,6 +59,59 @@ void sx_rx_push(struct sx1262 *s, const struct sx1262_event *event)
 	wake_up_interruptible(&s->read_wait);
 }
 
+/* Called with io held; release it while listening so IRQ and watchdog keep
+ * receiving/recovering normally. The ordered TX queue remains reserved.
+ * This is RX-aware contention avoidance, not CAD or carrier sensing.
+ */
+static int sx_wait_medium(struct sx_job *job)
+{
+	struct sx1262 *s = job->radio;
+	unsigned long deadline = jiffies + msecs_to_jiffies(
+		2 * sx1262_rx_airtime_ms(&s->config, 255) + 1000);
+	unsigned long backoff = 0;
+	u64 activity = s->rx_activity;
+	bool waiting = false;
+	int ret;
+
+	for (;;) {
+		if (s->dead || s->generation != job->generation)
+			return s->dead ? -ENODEV : -ECANCELED;
+		if (!s->online)
+			return -EIO;
+
+		/* Pick up a pending preamble even if its IRQ edge was lost. */
+		ret = sx_radio_irq(s, false);
+		if (ret < 0) {
+			sx_radio_recover(s, true);
+			return ret;
+		}
+		if (time_after_eq(jiffies, deadline))
+			return -EBUSY;
+
+		/* A short RX may have both started and finished during our sleep. */
+		if (activity != s->rx_activity) {
+			waiting = false;
+			activity = s->rx_activity;
+		}
+
+		if (s->rx_stage != SX_RX_WAITING) {
+			waiting = false;
+		} else {
+			if (!waiting) {
+				backoff = jiffies + msecs_to_jiffies(
+					get_random_u32_below(15) * 24);
+				waiting = true;
+			}
+			if (time_after_eq(jiffies, backoff))
+				return 0;
+		}
+
+		mutex_unlock(&s->io);
+		msleep(20);
+		mutex_lock(&s->io);
+	}
+}
+
 static void sx_tx_worker(struct work_struct *work)
 {
 	struct sx_job *job = container_of(work, struct sx_job, work);
@@ -80,6 +135,10 @@ static void sx_tx_worker(struct work_struct *work)
 		ret = -EIO;
 		goto finish;
 	}
+
+	ret = sx_wait_medium(job);
+	if (ret)
+		goto finish;
 
 	s->transmitting = true;
 
@@ -795,7 +854,7 @@ static int sx_probe(struct spi_device *spi)
 		.version = SX1262_ABI_VERSION,
 		.frequency_hz = clamp(868000000U, s->min_hz, s->max_hz),
 		.bandwidth_hz = 125000, .tx_power_dbm = s->powers[0].dbm,
-		.preamble_symbols = 25, .sync_word = 0x1424,
+		.tx_preamble_symbols = 25, .rx_preamble_symbols = 65, .sync_word = 0x1424,
 		.spreading_factor = 7, .coding_rate = 5, .crc = 1,
 		.silence_timeout_ms = 60000, .hard_reset_after = 2,
 	};

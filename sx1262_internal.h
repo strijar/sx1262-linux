@@ -49,6 +49,7 @@ struct sx1262 {
 	int id;
 	char name[24];
 	unsigned long last_irq, rx_deadline, retry_at;
+	u64 rx_activity; /* RX IRQ generation, including frames completed during backoff. */
 	enum sx_rx_stage rx_stage;
 	unsigned int strikes, empty_irqs;
 	u32 min_hz, max_hz, tcxo_uv, tcxo_us, rf_switch_us;

@@ -47,7 +47,7 @@ static int hex_digit(char c)
 int main(int argc, char **argv)
 {
 	struct sx1262_config config;
-	struct sx1262_tx_batch batch = { .version = 1, .cookie = 1 };
+	struct sx1262_tx_batch batch = { .version = SX1262_ABI_VERSION, .cookie = 1 };
 	struct sx1262_event event;
 	struct sx1262_stats stats;
 	struct pollfd pfd;
@@ -57,7 +57,7 @@ int main(int argc, char **argv)
 	if (argc < 6 || argc > 6 + SX1262_MAX_BATCH) {
 		fprintf(stderr, "Usage: %s DEVICE HZ BW SF POWER_DBM [HEX_FRAME ...]\n"
 			"Without frames: continuous RX. With frames: one atomic TX batch.\n"
-			"Other PHY fields use driver defaults (preamble=25, sync=1424, CRC, CR=5).\n",
+			"Other PHY fields use driver defaults (RX preamble=65, TX preamble=25, sync=1424, CRC, CR=5).\n",
 			argv[0]);
 		return EXIT_FAILURE;
 	}

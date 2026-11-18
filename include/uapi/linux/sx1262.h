@@ -5,7 +5,7 @@
 #include <linux/ioctl.h>
 #include <linux/types.h>
 
-#define SX1262_ABI_VERSION 1
+#define SX1262_ABI_VERSION 2
 #define SX1262_MAX_PAYLOAD 255
 #define SX1262_MAX_BATCH 8
 #define SX1262_MAX_RADIOS 8
@@ -16,7 +16,8 @@ struct sx1262_config {
 	__u32 frequency_hz;
 	__u32 bandwidth_hz;
 	__s32 tx_power_dbm; /* module output power, not necessarily chip power */
-	__u32 preamble_symbols;
+	__u32 tx_preamble_symbols;
+	__u32 rx_preamble_symbols;
 	__u32 silence_timeout_ms; /* 0 disables silence recovery; default 60000 */
 	__u16 sync_word;
 	__u8 spreading_factor; /* 5..12 */

@@ -79,8 +79,9 @@ properties:
   semtech,tcxo-startup-us:
     $ref: /schemas/types.yaml#/definitions/uint32
     maximum: 100000
-    default: 5000
-    description: TCXO startup time, rounded up to 64 kHz timer ticks.
+    description: |
+      TCXO startup time, rounded up to 64 kHz timer ticks.
+      Defaults to 21500 for E22, matching the legacy plugin, and 5000 otherwise.
 
   semtech,dio2-rf-switch:
     type: boolean
